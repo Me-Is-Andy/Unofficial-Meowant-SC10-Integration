@@ -1,0 +1,13 @@
+{
+  "domain": "meowant_sc10",
+  "name": "Meowant SC10 Litter Box",
+  "codeowners": ["@Me-Is-Andy"],
+  "config_flow": true,
+  "dependencies": ["http", "frontend"],
+  "documentation": "https://github.com/Me-Is-Andy/unofficial-meowant-sc10-integration",
+  "integration_type": "device",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/Me-Is-Andy/unofficial-meowant-sc10-integration/issues",
+  "requirements": [],
+  "version": "3.0.0"
+}

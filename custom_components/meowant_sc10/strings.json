@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Meowant SC10 Litter Box",
+        "description": "Enter the credentials from your Tuya IoT Platform cloud project, and the device ID of the litter box. See the documentation for how to obtain these.",
+        "data": {
+          "device_id": "Device ID",
+          "access_id": "Access ID",
+          "access_secret": "Access Secret",
+          "data_center": "Data center"
+        },
+        "data_description": {
+          "device_id": "Found under Cloud > Devices on the Tuya IoT Platform.",
+          "access_id": "Your cloud project's Access ID, sometimes shown as Client ID.",
+          "access_secret": "Your cloud project's Access Secret.",
+          "data_center": "The region your Smart Life account is registered in. The wrong one will fail to authenticate."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the Tuya API. Check your network and the selected data center.",
+      "invalid_auth": "Tuya rejected these credentials. Check the Access ID and Access Secret, and that the data center matches your account.",
+      "unknown_device": "Authentication worked, but that device ID returned nothing. Check the ID and that the device is linked to this cloud project."
+    },
+    "abort": {
+      "already_configured": "This litter box is already set up."
+    }
+  },
+  "selector": {
+    "data_center": {
+      "options": {
+        "us": "Western America",
+        "eu": "Central Europe",
+        "cn": "China",
+        "in": "India"
+      }
+    }
+  }
+}
