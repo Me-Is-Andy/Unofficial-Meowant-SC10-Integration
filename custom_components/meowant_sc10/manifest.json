@@ -9,5 +9,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/Me-Is-Andy/Unofficial-Meowant-SC10-Integration/issues",
   "requirements": ["tinytuya>=1.13.0"],
-  "version": "1.1.1"
+  "version": "1.1.2"
 }
