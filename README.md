@@ -8,7 +8,7 @@ Not affiliated with or endorsed by Meowant or Tuya.
 
 The SC10 pairs with Home Assistant through the built-in Tuya integration, but that integration does not expose the manual clean cycle, the empty cycle, or the per-visit data the device records. This one does, and adds a few things the device itself gets wrong.
 
-## Local or cloud
+## Local or Cloud
 
 Local control is the default and is recommended. It talks to the device directly over your network, so updates arrive the moment something happens rather than on a polling interval, it keeps working when your internet does not, and it uses no Tuya API quota.
 
