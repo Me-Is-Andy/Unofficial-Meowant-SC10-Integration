@@ -599,7 +599,11 @@ class MeowantCloudCoordinator(MeowantBaseCoordinator):
 
     @callback
     def _track_clean(self, raw: dict) -> None:
-        """Record when DP 107 last reported a finished clean cycle."""
+        """Record when DP 107 last reported a finished clean cycle.
+
+        The cloud carries the datapoint's own timestamp, so a value that has
+        not changed produces the same result and is skipped by _record_clean.
+        """
         record = raw.get(HISTORY_DP)
         if not record or record.get("value") != CLEAN_DONE_VALUE:
             return
@@ -680,11 +684,14 @@ class MeowantLocalCoordinator(MeowantBaseCoordinator):
 
         self._entry = entry
         self._values: dict = {}
-        # A full status refresh re-reports every datapoint, including ones
-        # whose value has not changed. These remember what was last seen so a
-        # repeat is not mistaken for a new event.
+        # The LAN protocol carries no timestamps, so an event is only an event
+        # if the value changed while we were watching. The first reading after
+        # connecting is whatever the device happens to be holding - often a
+        # clean that finished hours ago - so it primes these and records
+        # nothing.
         self._last_history = None
         self._last_visit_record = None
+        self._primed = False
         self._client = TuyaLocalClient(
             hass,
             device_id,
@@ -747,25 +754,33 @@ class MeowantLocalCoordinator(MeowantBaseCoordinator):
 
         Runs on the event loop. A datapoint arriving with a value it already
         held is a status refresh echoing state back, not a new event, so both
-        the visit and clean records compare against what was last seen.
+        the visit and clean records compare against what was last seen. The
+        very first reading primes those comparisons without recording
+        anything: it describes the past, not something that just happened.
         """
         self._roll_day()
 
+        priming = not self._primed
+
         if VISIT_DP in dps:
             record = dps[VISIT_DP]
-            first_seen = self._last_visit_record is None
             if record != self._last_visit_record:
                 self._last_visit_record = record
-                if not first_seen:
+                if not priming:
                     duration, weight = decode_visit_record(record)
                     self._record_visit(duration, weight, dt_util.utcnow())
 
         if HISTORY_DP in dps:
             history = dps[HISTORY_DP]
-            if history == CLEAN_DONE_VALUE and self._last_history != CLEAN_DONE_VALUE:
+            if (
+                not priming
+                and history == CLEAN_DONE_VALUE
+                and self._last_history != CLEAN_DONE_VALUE
+            ):
                 self._record_clean(dt_util.utcnow())
             self._last_history = history
 
+        self._primed = True
         self._values.update(dps)
         self._track_settings(self._values)
         self.async_set_updated_data(dict(self._values))
@@ -776,6 +791,9 @@ class MeowantLocalCoordinator(MeowantBaseCoordinator):
             _LOGGER.info("Local connection to %s is up", self.device_id)
         else:
             _LOGGER.warning("Local connection to %s is down", self.device_id)
+            # A reconnection replays the device's current state, which must not
+            # be mistaken for events that happened while we were away.
+            self._primed = False
         self.async_update_listeners()
 
     @callback
