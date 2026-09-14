@@ -64,21 +64,33 @@ const absolute = (iso) => {
 const isUsable = (state) =>
   state && !["unknown", "unavailable", ""].includes(state.state);
 
+// The registry map has moved around between frontend versions, so read it
+// defensively: an exception here hangs the card picker's preview forever.
+const entityRegistry = (hass) => {
+  if (!hass) return {};
+  if (hass.entities && typeof hass.entities === "object") return hass.entities;
+  return {};
+};
+
 class MeowantLitterBoxCard extends HTMLElement {
   static getConfigElement() {
     return document.createElement(EDITOR_TAG);
   }
 
   static getStubConfig(hass) {
-    const entities = hass.entities || {};
-    const match = Object.values(entities).find(
-      (entry) => entry.platform === INTEGRATION && entry.device_id
-    );
-    return { device_id: match ? match.device_id : "", title: "Litter Box" };
+    const fallback = { device_id: "", title: "Litter Box" };
+    try {
+      const match = Object.values(entityRegistry(hass)).find(
+        (entry) => entry && entry.platform === INTEGRATION && entry.device_id
+      );
+      return match ? { device_id: match.device_id, title: "Litter Box" } : fallback;
+    } catch (err) {
+      return fallback;
+    }
   }
 
   setConfig(config) {
-    this._config = { title: "Litter Box", ...config };
+    this._config = { title: "Litter Box", ...(config || {}) };
     this._built = false;
     if (this._hass) this._update();
   }
@@ -94,15 +106,20 @@ class MeowantLitterBoxCard extends HTMLElement {
 
   _resolve() {
     const found = {};
-    const entities = this._hass.entities || {};
-    const deviceId = this._config.device_id;
+    try {
+      const entities = entityRegistry(this._hass);
+      const deviceId = this._config.device_id;
 
-    for (const [entityId, entry] of Object.entries(entities)) {
-      if (entry.platform !== INTEGRATION) continue;
-      if (deviceId && entry.device_id !== deviceId) continue;
-      for (const [key, matches] of Object.entries(MATCHERS)) {
-        if (!found[key] && matches(entityId)) found[key] = entityId;
+      for (const [entityId, entry] of Object.entries(entities)) {
+        if (!entry || entry.platform !== INTEGRATION) continue;
+        if (deviceId && entry.device_id !== deviceId) continue;
+        for (const [key, matches] of Object.entries(MATCHERS)) {
+          if (!found[key] && matches(entityId)) found[key] = entityId;
+        }
       }
+    } catch (err) {
+      // Fall through with whatever was resolved; the card degrades to dashes
+      // rather than failing to render at all.
     }
 
     for (const key of Object.keys(MATCHERS)) {
@@ -196,42 +213,56 @@ class MeowantLitterBoxCard extends HTMLElement {
 
   _update() {
     if (!this._hass || !this._config) return;
-    if (!this._built) this._build();
 
-    const ids = this._resolve();
-    const get = (key) => (ids[key] ? this._hass.states[ids[key]] : undefined);
+    try {
+      if (!this._built) this._build();
 
-    const status = get("status");
-    const binFull = get("binFull");
-    if (binFull && binFull.state === "on") {
-      this._els.badge.textContent = "Bin full";
-      this._els.badge.style.background = "var(--error-color)";
-      this._els.badge.style.color = "var(--text-primary-color)";
-    } else {
-      this._els.badge.textContent = isUsable(status) ? status.state : "Unknown";
-      this._els.badge.style.background = "var(--secondary-background-color)";
-      this._els.badge.style.color = "var(--primary-text-color)";
+      const ids = this._resolve();
+      const get = (key) => (ids[key] ? this._hass.states[ids[key]] : undefined);
+
+      const status = get("status");
+      const binFull = get("binFull");
+      if (binFull && binFull.state === "on") {
+        this._els.badge.textContent = "Bin full";
+        this._els.badge.style.background = "var(--error-color)";
+        this._els.badge.style.color = "var(--text-primary-color)";
+      } else {
+        this._els.badge.textContent = isUsable(status) ? status.state : "Unknown";
+        this._els.badge.style.background = "var(--secondary-background-color)";
+        this._els.badge.style.color = "var(--primary-text-color)";
+      }
+
+      const visits = get("visits");
+      const visitAt = visits && visits.attributes.last_visit_at;
+      this._els.visit.value.innerHTML = visitAt
+        ? `${absolute(visitAt)}<br><span style="font-size:12px;color:var(--secondary-text-color)">${relative(visitAt)}</span>`
+        : "None recorded";
+
+      const clean = get("lastClean");
+      this._els.clean.value.innerHTML = isUsable(clean)
+        ? `${absolute(clean.state)}<br><span style="font-size:12px;color:var(--secondary-text-color)">${relative(clean.state)}</span>`
+        : "None recorded";
+
+      // Plain ASCII only: this file has been mangled by an encoding mismatch
+      // before, and non-ASCII punctuation is not worth the risk.
+      const uses = get("uses");
+      const visitCount = isUsable(visits) ? visits.state : "-";
+      const useCount = isUsable(uses) ? uses.state : "-";
+      this._els.today.value.textContent = `${visitCount} visits, ${useCount} uses`;
+
+      this._els.button.disabled = !ids.cleanButton;
+    } catch (err) {
+      // Never leave the card blank: a thrown error inside the picker preview
+      // shows as a spinner that never resolves, with nothing to explain it.
+      console.error("meowant-litter-box-card failed to render", err);
+      this.innerHTML = "";
+      const card = document.createElement("ha-card");
+      card.style.padding = "16px";
+      card.textContent =
+        "Meowant SC10 card could not render. See the browser console.";
+      this.appendChild(card);
+      this._built = false;
     }
-
-    const visits = get("visits");
-    const visitAt = visits && visits.attributes.last_visit_at;
-    this._els.visit.value.innerHTML = visitAt
-      ? `${absolute(visitAt)}<br><span style="font-size:12px;color:var(--secondary-text-color)">${relative(visitAt)}</span>`
-      : "None recorded";
-
-    const clean = get("lastClean");
-    this._els.clean.value.innerHTML = isUsable(clean)
-      ? `${absolute(clean.state)}<br><span style="font-size:12px;color:var(--secondary-text-color)">${relative(clean.state)}</span>`
-      : "None recorded";
-
-    // Plain ASCII only: this file has been mangled by an encoding mismatch
-    // before, and non-ASCII punctuation is not worth the risk.
-    const uses = get("uses");
-    const visitCount = isUsable(visits) ? visits.state : "-";
-    const useCount = isUsable(uses) ? uses.state : "-";
-    this._els.today.value.textContent = `${visitCount} visits, ${useCount} uses`;
-
-    this._els.button.disabled = !ids.cleanButton;
   }
 }
 

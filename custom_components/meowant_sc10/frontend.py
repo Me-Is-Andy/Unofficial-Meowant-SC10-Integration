@@ -16,7 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # Bump this whenever meowant-card.js changes, or browsers will serve a stale
 # copy from cache.
-CARD_VERSION = "1.0.2"
+CARD_VERSION = "1.0.3"
 CARD_FILENAME = "meowant-card.js"
 CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
 
