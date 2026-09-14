@@ -32,7 +32,7 @@ DATA_CENTERS = {
 DEFAULT_DATA_CENTER = "us"
 
 TOKEN_PATH = "/v1.0/token?grant_type=1"
-DEVICE_LIST_PATH = "/v2.0/cloud/thing/device?page_size=100"
+DEVICE_LIST_PATH = "/v2.0/cloud/thing/device?page_size=20"
 
 
 def status_path(device_id: str) -> str:

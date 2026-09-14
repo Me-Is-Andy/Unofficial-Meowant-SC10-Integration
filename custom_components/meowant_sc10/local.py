@@ -25,6 +25,9 @@ SOCKET_TIMEOUT = 5
 HEARTBEAT_INTERVAL = 20
 RECONNECT_DELAY = 15
 COMMAND_TIMEOUT = 15
+# How long setup waits for the worker thread to establish the first
+# connection before giving up and letting Home Assistant retry.
+STARTUP_TIMEOUT = 30
 
 # A scan takes most of a minute and most disconnections are transient, so only
 # go looking for a moved device after several failed reconnection attempts.
@@ -68,10 +71,12 @@ class TuyaLocalClient:
 
         self._commands: queue.Queue = queue.Queue()
         self._stop = threading.Event()
+        self._ready = threading.Event()
         self._thread: threading.Thread | None = None
         self._connected = False
         self._failures = 0
         self._last_scan = 0.0
+        self._last_error: str | None = None
 
     @property
     def connected(self) -> bool:
@@ -82,12 +87,25 @@ class TuyaLocalClient:
         return self._host
 
     async def async_start(self) -> None:
-        """Begin the worker thread."""
+        """Start the worker thread and wait for it to connect.
+
+        Setup must not report success before the socket is open, or the first
+        refresh finds no data and the whole entry fails.
+        """
         self._stop.clear()
+        self._ready.clear()
         self._thread = threading.Thread(
             target=self._run, name=f"meowant-{self._device_id[:8]}", daemon=True
         )
         self._thread.start()
+
+        connected = await self._hass.async_add_executor_job(
+            self._ready.wait, STARTUP_TIMEOUT
+        )
+        if not connected:
+            await self.async_stop()
+            reason = self._last_error or "the device did not respond"
+            raise TuyaLocalError(f"Could not connect to {self._host}: {reason}")
 
     async def async_stop(self) -> None:
         """Signal the worker thread to finish and wait briefly for it."""
@@ -140,6 +158,7 @@ class TuyaLocalClient:
 
             except Exception as err:
                 _LOGGER.debug("Local connection lost: %s", err)
+                self._last_error = str(err)
                 device = self._drop(device)
                 self._failures += 1
                 if self._failures >= FAILURES_BEFORE_RESCAN:
@@ -210,8 +229,11 @@ class TuyaLocalClient:
             raise TuyaLocalError(f"Device did not return a status: {status}")
 
         self._failures = 0
+        self._last_error = None
         self._set_connected(True)
         self._emit(status["dps"])
+        # Only now is there data to serve, so setup may proceed.
+        self._ready.set()
         _LOGGER.info("Local connection to %s established", self._device_id)
         return device
 

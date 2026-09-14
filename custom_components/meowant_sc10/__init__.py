@@ -680,6 +680,11 @@ class MeowantLocalCoordinator(MeowantBaseCoordinator):
 
         self._entry = entry
         self._values: dict = {}
+        # A full status refresh re-reports every datapoint, including ones
+        # whose value has not changed. These remember what was last seen so a
+        # repeat is not mistaken for a new event.
+        self._last_history = None
+        self._last_visit_record = None
         self._client = TuyaLocalClient(
             hass,
             device_id,
@@ -717,37 +722,49 @@ class MeowantLocalCoordinator(MeowantBaseCoordinator):
         return None
 
     async def async_prepare(self) -> None:
+        """Connect before setup completes, so the first refresh has data."""
         await self._client.async_start()
 
     async def async_shutdown_transport(self) -> None:
         await self._client.async_stop()
 
     async def _async_update_data(self) -> dict:
-        """Return the pushed values, asking for a full status occasionally."""
+        """Return the pushed values, asking for a full status occasionally.
+
+        The datapoints arrive through _handle_dps rather than being returned
+        from here, so this only nudges the device for a fresh reading. A lost
+        connection is reported by the connectivity sensor and by each entity's
+        availability, not by failing the update.
+        """
         self._roll_day()
         if self._client.connected:
             await self._client.async_refresh()
-        elif not self._values:
-            raise UpdateFailed("No local connection to the device")
         return dict(self._values)
 
     @callback
     def _handle_dps(self, dps: dict) -> None:
         """Process datapoints pushed by the device.
 
-        Runs on the event loop. Unlike the cloud path there is no timestamp to
-        compare, because each datapoint arrives as its own event: a DP 102
-        message *is* a completed visit, even if an identical one arrived a
-        minute ago.
+        Runs on the event loop. A datapoint arriving with a value it already
+        held is a status refresh echoing state back, not a new event, so both
+        the visit and clean records compare against what was last seen.
         """
         self._roll_day()
 
         if VISIT_DP in dps:
-            duration, weight = decode_visit_record(dps[VISIT_DP])
-            self._record_visit(duration, weight, dt_util.utcnow())
+            record = dps[VISIT_DP]
+            first_seen = self._last_visit_record is None
+            if record != self._last_visit_record:
+                self._last_visit_record = record
+                if not first_seen:
+                    duration, weight = decode_visit_record(record)
+                    self._record_visit(duration, weight, dt_util.utcnow())
 
-        if dps.get(HISTORY_DP) == CLEAN_DONE_VALUE:
-            self._record_clean(dt_util.utcnow())
+        if HISTORY_DP in dps:
+            history = dps[HISTORY_DP]
+            if history == CLEAN_DONE_VALUE and self._last_history != CLEAN_DONE_VALUE:
+                self._record_clean(dt_util.utcnow())
+            self._last_history = history
 
         self._values.update(dps)
         self._track_settings(self._values)

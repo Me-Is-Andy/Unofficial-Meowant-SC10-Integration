@@ -112,9 +112,10 @@ class MeowantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 user_input[CONF_ACCESS_SECRET].strip(),
             )
 
+            # Authentication and the device list are checked separately so a
+            # failure in the second is not reported as bad credentials.
             try:
                 await api.async_fetch_token()
-                devices = await api.async_list_devices()
             except TuyaApiError as err:
                 _LOGGER.error("Tuya rejected the credentials: %s", err)
                 errors["base"] = "invalid_auth"
@@ -122,17 +123,26 @@ class MeowantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected error reaching Tuya")
                 errors["base"] = "cannot_connect"
             else:
-                if not devices:
-                    errors["base"] = "no_devices"
+                try:
+                    devices = await api.async_list_devices()
+                except TuyaApiError as err:
+                    _LOGGER.error("Could not list devices: %s", err)
+                    errors["base"] = "cannot_connect"
+                except Exception:
+                    _LOGGER.exception("Unexpected error listing devices")
+                    errors["base"] = "cannot_connect"
                 else:
-                    self._credentials = {
-                        CONF_ACCESS_ID: user_input[CONF_ACCESS_ID].strip(),
-                        CONF_ACCESS_SECRET: user_input[CONF_ACCESS_SECRET].strip(),
-                        CONF_DATA_CENTER: user_input[CONF_DATA_CENTER],
-                        CONF_MODE: user_input[CONF_MODE],
-                    }
-                    self._devices = devices
-                    return await self.async_step_device()
+                    if not devices:
+                        errors["base"] = "no_devices"
+                    else:
+                        self._credentials = {
+                            CONF_ACCESS_ID: user_input[CONF_ACCESS_ID].strip(),
+                            CONF_ACCESS_SECRET: user_input[CONF_ACCESS_SECRET].strip(),
+                            CONF_DATA_CENTER: user_input[CONF_DATA_CENTER],
+                            CONF_MODE: user_input[CONF_MODE],
+                        }
+                        self._devices = devices
+                        return await self.async_step_device()
 
         return self.async_show_form(
             step_id="user",

@@ -1,12 +1,20 @@
 # Unofficial Meowant SC10 Integration
 
-A Home Assistant integration for the Meowant SC10 self-cleaning litter box, built on the Tuya Cloud API.
+A Home Assistant integration for the Meowant SC10 self-cleaning litter box, with local network control or Tuya cloud control.
 
 Not affiliated with or endorsed by Meowant or Tuya.
 
 ## Why this exists
 
 The SC10 pairs with Home Assistant through the built-in Tuya integration, but that integration does not expose the manual clean cycle, the empty cycle, or the per-visit data the device records. This one does, and adds a few things the device itself gets wrong.
+
+## Local or cloud
+
+Local control is the default and is recommended. It talks to the device directly over your network, so updates arrive the moment something happens rather than on a polling interval, it keeps working when your internet does not, and it uses no Tuya API quota.
+
+Cloud control remains available and works the same way from Home Assistant's point of view, polling every 30 seconds.
+
+Either way you need a Tuya IoT Platform cloud project: local control uses it once during setup to read the device's local key.
 
 ## What you get
 
@@ -35,11 +43,14 @@ Registered automatically; no HACS frontend resource to configure. Find it in the
 
 **Settings survive a power cycle.** The SC10 forgets several settings when it loses power. This integration remembers what they were and puts them back when it notices the device has restarted.
 
+**Local control survives an IP change.** If the device moves to a different address, the integration finds it again on the network and saves the new one.
+
 ## Requirements
 
 - Home Assistant 2024.8 or newer
 - A Tuya IoT Platform cloud project, which is free
 - Your litter box already set up in the Smart Life or Tuya app
+- For local control: the litter box and Home Assistant on the same network, and a static or reserved IP address for the box
 
 ## Setting up Tuya
 
@@ -49,8 +60,7 @@ This is the fiddly part. Budget fifteen minutes.
 2. Go to **Cloud** > **Development** and click **Create Cloud Project**. Choose the data center matching where your Smart Life account is registered — the app shows this under **Me** > **Settings** > **Account and Security** > **Region**. The wrong data center will fail to authenticate.
 3. Once created, note the **Access ID** and **Access Secret** on the project's Overview tab.
 4. Go to the **Devices** tab, then **Link App Account**, and scan the QR code with the Smart Life app (**Me** > the scan icon, top right).
-5. Still on the **Devices** tab, find your litter box and copy its **Device ID**.
-6. On the **Service API** tab, confirm **IoT Core** is subscribed. It is free, but the trial expires periodically and needs renewing — an expired subscription is the most common cause of the integration failing and losing communication with the device.
+5. On the **Service API** tab, confirm **IoT Core** is subscribed. It is free, but the trial expires periodically and needs renewing — an expired subscription is the most common cause of the integration failing and losing communication with the device.
 
 ## Installation
 
@@ -68,15 +78,17 @@ Copy `custom_components/meowant_sc10` into your `config/custom_components/` dire
 
 **Settings** > **Devices & Services** > **Add Integration** > **Meowant SC10**.
 
-Enter the device ID, access ID, access secret, and data center from the Tuya setup above. The integration validates all four before saving, so an error at this point means one of them is wrong rather than something failing later.
+Enter the Access ID, Access Secret and data center, and choose local or cloud control. The integration then lists the devices in your cloud project so you can pick the litter box by name.
+
+For local control there is one more step: confirm the device's address on your network. It is found automatically where possible, and the local key is filled in from the cloud.
 
 ## Notes and limitations
 
-**Polling.** The Tuya Cloud API has no push mechanism, so state is polled every 30 seconds. A visit shorter than that is still counted, because visits are read from a record the device writes rather than from live state, but Home Assistant will not see the cat enter in real time.
+**Local control needs a fixed address.** Give the litter box a DHCP reservation on your router. The integration recovers if the address changes, but a reservation avoids the interruption.
 
-**API quota.** Roughly 3,600 calls a day at the default interval. Tuya's free tier is generous enough for one device, but several devices on one cloud project will add up.
+**Cloud mode polls.** The Tuya Cloud API has no push mechanism, so cloud mode reads state every 30 seconds and uses roughly 3,600 API calls a day. Tuya's free tier is generous enough for one device, but several devices on one cloud project will add up. Local control has neither limitation.
 
-**Restart detection is heuristic.** A power cycle is detected by several settings changing in the same poll. Changing three or more settings by hand in the vendor app inside 30 seconds would be misread as a restart, and your saved values would be reverted.
+**Restart detection is heuristic.** A power cycle is detected by several settings changing at once. Changing three or more settings by hand in the vendor app within a short window would be misread as a restart, and your saved values would be reverted.
 
 **One firmware.** The datapoint map was derived from one SC10. Other units very likely match, but a different firmware could differ, and the labels for the error bitmaps are inferred from Tuya's datapoint specification rather than observed.
 
@@ -91,9 +103,13 @@ logger:
     custom_components.meowant_sc10: debug
 ```
 
-**Entities unavailable, log shows `1010` or `token invalid`.** The credentials were rejected. Usually an expired IoT Core subscription, occasionally a rotated Access Secret.
+**Setup fails with "Could not reach the device on your network".** Check the IP address is right and that Home Assistant is on the same network as the litter box. If the device was set up recently, try protocol version 3.4 or 3.3.
 
-**Entities unavailable, log shows `1004` or `sign invalid`.** The Access Secret is wrong, or the data center does not match the account.
+**Entities unavailable in local mode.** The connection dropped. The log will show reconnection attempts; if the device changed address, the integration scans for it after a few failures.
+
+**Entities unavailable in cloud mode, log shows `1010` or `token invalid`.** The credentials were rejected. Usually an expired IoT Core subscription, occasionally a rotated Access Secret.
+
+**Entities unavailable in cloud mode, log shows `1004` or `sign invalid`.** The Access Secret is wrong, or the data center does not match the account.
 
 **The card does not appear in the picker.** Hard-refresh the browser (Ctrl+Shift+R). If that fails, clear the site's service worker under the browser's developer tools, Application tab.
 
