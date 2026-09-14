@@ -42,7 +42,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 class MeowantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle the Meowant SC10 config flow."""
 
-    VERSION = 3
+    VERSION = 1
 
     async def async_step_user(self, user_input=None):
         errors = {}

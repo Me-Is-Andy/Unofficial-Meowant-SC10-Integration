@@ -4,10 +4,10 @@
   "codeowners": ["@Me-Is-Andy"],
   "config_flow": true,
   "dependencies": ["http", "frontend"],
-  "documentation": "https://github.com/Me-Is-Andy/unofficial-meowant-sc10-integration",
+  "documentation": "https://github.com/Me-Is-Andy/Unofficial-Meowant-SC10-Integration",
   "integration_type": "device",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/Me-Is-Andy/unofficial-meowant-sc10-integration/issues",
+  "issue_tracker": "https://github.com/Me-Is-Andy/Unofficial-Meowant-SC10-Integration/issues",
   "requirements": [],
-  "version": "3.0.0"
+  "version": "1.0.0"
 }
