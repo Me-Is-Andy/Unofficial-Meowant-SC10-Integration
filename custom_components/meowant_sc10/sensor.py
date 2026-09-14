@@ -42,8 +42,14 @@ async def async_setup_entry(
     entities.append(MeowantUsesToday(coordinator))
     entities.append(MeowantLastCleanCompleted(coordinator))
     entities.append(MeowantLastCleanElapsed(coordinator))
-    entities.append(MeowantActivated(coordinator))
+    entities.append(MeowantConnectionType(coordinator))
     entities.append(MeowantUptime(coordinator))
+
+    # The activation date comes from the cloud device record; the LAN protocol
+    # has no equivalent, so the entity is only meaningful in cloud mode.
+    if coordinator.transport == "cloud":
+        entities.append(MeowantActivated(coordinator))
+
     async_add_entities(entities)
 
 
@@ -100,7 +106,7 @@ class MeowantDerivedSensor(MeowantBaseEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        # Derived locally, so a failed cloud poll doesn't blank the value.
+        # Derived locally, so a lost connection doesn't blank the value.
         return True
 
 
@@ -216,11 +222,34 @@ class MeowantLastCleanElapsed(MeowantCleanTimeBase):
         return self.completed_at
 
 
+class MeowantConnectionType(MeowantDerivedSensor):
+    """Whether this device is being reached locally or through the cloud."""
+
+    _attr_name = "Connection Type"
+    _attr_icon = "mdi:transit-connection-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = coordinator.uid("connection_type")
+
+    @property
+    def native_value(self) -> str:
+        return "Local" if self.coordinator.transport == "local" else "Cloud"
+
+    @property
+    def extra_state_attributes(self):
+        if self.coordinator.transport == "local":
+            return {"host": self.coordinator.host}
+        return None
+
+
 class MeowantActivated(MeowantDerivedSensor):
     """When the device was first paired, per Tuya's active_time.
 
     Despite the field's name this is the activation date, not the last
-    connection: it does not move when the device is power cycled.
+    connection: it does not move when the device is power cycled. Cloud mode
+    only; the LAN protocol does not report it.
     """
 
     _attr_name = "Device Activated"
@@ -247,10 +276,9 @@ class MeowantActivated(MeowantDerivedSensor):
 class MeowantUptime(MeowantDerivedSensor):
     """How long since the device was last seen restarting.
 
-    Measured from the last restart this integration detected. Until one is
-    seen, it falls back to the activation date and says so in an attribute.
-    Reported in hours at one decimal place: finer resolution would write a new
-    state to the recorder on every poll for no real gain.
+    Measured from the last restart this integration detected. In cloud mode it
+    falls back to the activation date until one is seen; locally there is no
+    such fallback, so it reads unknown until a restart happens.
     """
 
     _attr_name = "Uptime"

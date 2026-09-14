@@ -3,25 +3,48 @@
     "step": {
       "user": {
         "title": "Meowant SC10 Litter Box",
-        "description": "Enter the credentials from your Tuya IoT Platform cloud project, and the device ID of the litter box. See the documentation for how to obtain these.",
+        "description": "Enter the credentials from your Tuya IoT Platform cloud project. These are needed even for local control, because they are how the device's local key is obtained.",
         "data": {
-          "device_id": "Device ID",
           "access_id": "Access ID",
           "access_secret": "Access Secret",
-          "data_center": "Data center"
+          "data_center": "Data center",
+          "mode": "Control method"
         },
         "data_description": {
-          "device_id": "Found under Cloud > Devices on the Tuya IoT Platform.",
           "access_id": "Your cloud project's Access ID, sometimes shown as Client ID.",
           "access_secret": "Your cloud project's Access Secret.",
-          "data_center": "The region your Smart Life account is registered in. The wrong one will fail to authenticate."
+          "data_center": "The region your Smart Life account is registered in. The wrong one will fail to authenticate.",
+          "mode": "Local control talks to the device directly over your network: it is faster, keeps working without internet, and uses no API quota. Cloud control works from anywhere but polls every 30 seconds."
+        }
+      },
+      "device": {
+        "title": "Choose your litter box",
+        "description": "These are the devices linked to your cloud project.",
+        "data": {
+          "device_id": "Device"
+        }
+      },
+      "local": {
+        "title": "Local connection",
+        "description": "The local key was read from your cloud project. The address below was found by scanning your network; correct it if it is wrong or blank.",
+        "data": {
+          "host": "IP address",
+          "local_key": "Local key",
+          "protocol_version": "Protocol version"
+        },
+        "data_description": {
+          "host": "The device's address on your local network. Give it a static lease on your router, or this will break when the address changes.",
+          "local_key": "Read from the cloud automatically. It changes if the device is re-paired in the vendor app.",
+          "protocol_version": "3.5 for recent devices. Try 3.3 or 3.4 if the connection fails."
         }
       }
     },
     "error": {
       "cannot_connect": "Could not reach the Tuya API. Check your network and the selected data center.",
       "invalid_auth": "Tuya rejected these credentials. Check the Access ID and Access Secret, and that the data center matches your account.",
-      "unknown_device": "Authentication worked, but that device ID returned nothing. Check the ID and that the device is linked to this cloud project."
+      "no_devices": "No devices found in this cloud project. Link your Smart Life account on the Devices tab of the Tuya IoT Platform.",
+      "cannot_connect_local": "Could not reach the device on your network. Check the IP address, and try a different protocol version.",
+      "tinytuya_missing": "The tinytuya library is not available. Restart Home Assistant and try again."
     },
     "abort": {
       "already_configured": "This litter box is already set up."
@@ -34,6 +57,12 @@
         "eu": "Central Europe",
         "cn": "China",
         "in": "India"
+      }
+    },
+    "mode": {
+      "options": {
+        "local": "Local (recommended)",
+        "cloud": "Cloud"
       }
     }
   }

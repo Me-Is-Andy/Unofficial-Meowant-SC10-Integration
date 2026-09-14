@@ -56,10 +56,11 @@ class MeowantBinFull(MeowantBaseEntity, BinarySensorEntity):
 
 
 class MeowantConnectivity(MeowantBaseEntity, BinarySensorEntity):
-    """Whether the Tuya cloud currently considers the device online.
+    """Whether the device is currently reachable.
 
-    This is the only honest signal of the device being reachable: the status
-    endpoint keeps serving cached values after it is unplugged.
+    In local mode this is the state of the LAN socket. In cloud mode it is
+    Tuya's online flag, which is the only honest signal there: the status
+    endpoint keeps serving cached values after the device is unplugged.
     """
 
     _attr_name = "Connectivity"

@@ -54,8 +54,8 @@ class MeowantConfirmationText(MeowantBaseEntity, TextEntity):
 
     @property
     def available(self) -> bool:
-        # Purely local state: stays usable through a failed poll or an offline
-        # device, so the phrase can be typed before the device is reachable.
+        # Purely local state: stays usable through a lost connection, so the
+        # phrase can be typed before the device is reachable.
         return True
 
     @property

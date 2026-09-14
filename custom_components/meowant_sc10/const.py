@@ -6,6 +6,20 @@ CONF_DEVICE_ID = "device_id"
 CONF_ACCESS_ID = "access_id"
 CONF_ACCESS_SECRET = "access_secret"
 CONF_DATA_CENTER = "data_center"
+CONF_MODE = "mode"
+CONF_HOST = "host"
+CONF_LOCAL_KEY = "local_key"
+CONF_PROTOCOL_VERSION = "protocol_version"
+
+MODE_CLOUD = "cloud"
+MODE_LOCAL = "local"
+MODES = [MODE_LOCAL, MODE_CLOUD]
+DEFAULT_MODE = MODE_LOCAL
+
+# Verified on the reference device; the config flow reads the real value from
+# the cloud, so this is only a fallback.
+DEFAULT_PROTOCOL_VERSION = "3.5"
+PROTOCOL_VERSIONS = ["3.1", "3.2", "3.3", "3.4", "3.5"]
 
 # Tuya serves each account from exactly one data center, fixed by the country
 # the app account was registered in.
@@ -18,6 +32,7 @@ DATA_CENTERS = {
 DEFAULT_DATA_CENTER = "us"
 
 TOKEN_PATH = "/v1.0/token?grant_type=1"
+DEVICE_LIST_PATH = "/v2.0/cloud/thing/device?page_size=100"
 
 
 def status_path(device_id: str) -> str:
@@ -37,28 +52,32 @@ def storage_key(device_id: str) -> str:
     return f"{DOMAIN}_{device_id}"
 
 
+# Cloud mode polls; local mode is push-driven and only polls as a safety net.
 SCAN_INTERVAL = 30
+LOCAL_REFRESH_INTERVAL = 300
 
 # Tuya's status endpoint serves a cached shadow copy, so it keeps returning
 # values long after the device is unplugged. The online flag on the device
 # record is the only thing that reflects reality, and it costs an extra API
 # call, so check it every Nth poll: every 4 keeps it under two minutes stale.
+# Local mode knows the connection state directly and does not use this.
 RECONNECT_CHECK_EVERY = 4
 
 # The primary reboot signal: a power cycle resets several settings in one go,
-# and they all land in a single poll. On the reference device four settings
-# reset, so three gives some margin without being plausible as deliberate
-# changes made inside one 30-second window.
+# and they all land together. On the reference device four settings reset, so
+# three gives some margin without being plausible as deliberate changes made
+# inside one window.
 RESET_DETECTION_THRESHOLD = 3
 
 # platform: switch | number | sensor | time
 # category: config | diagnostic | omitted for the main Controls/Sensors sections
 # Time datapoints are stored as minutes since midnight (0-1435, 5-minute steps).
 #
-# DP 7 (excretion_times_day) is deliberately absent: despite its name, on this
-# firmware the device rewrites it as 1 after every visit rather than
-# accumulating, so it never reads anything but 1. Visits Today and Uses Today
-# count from DP 102 instead.
+# DP 7 (excretion_times_day) is deliberately absent: despite its name, the
+# device rewrites it as 1 after every visit rather than accumulating, so it
+# never reads anything but 1. Confirmed by watching it fire with the same
+# value on consecutive visits. Visits Today and Uses Today count DP 102
+# instead.
 DP_MAPPING = {
     4:   {"name": "Auto Clean",          "platform": "switch", "code": "auto_clean",          "category": "config", "icon": "mdi:autorenew"},
     5:   {"name": "Delay Clean Time",    "platform": "number", "code": "delay_clean_time",    "category": "config", "min": 1, "max": 60, "unit": "min", "icon": "mdi:timer-outline"},
@@ -83,8 +102,9 @@ DP_MAPPING = {
 TIME_STEP_MINUTES = 5
 TIME_MAX_MINUTES = 1435
 
-# DP 102 (cat_duration_weight) emits one raw record per completed visit:
-# bytes 0-1 are the duration in seconds, bytes 2-3 appear to be weight.
+# DP 102 (cat_duration_weight) emits one record per completed visit: bytes 0-1
+# are the duration in seconds, bytes 2-3 are weight. The duration was verified
+# against observed entry and exit times; weight has only ever read zero.
 VISIT_DP = 102
 # A visit at least this long counts as a "use" rather than just a visit.
 USE_MIN_DURATION_SECONDS = 30

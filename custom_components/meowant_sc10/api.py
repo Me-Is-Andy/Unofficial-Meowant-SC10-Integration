@@ -8,7 +8,13 @@ from datetime import timedelta
 import aiohttp
 from homeassistant.util import dt as dt_util
 
-from .const import TOKEN_PATH, command_path, device_info_path, status_path
+from .const import (
+    DEVICE_LIST_PATH,
+    TOKEN_PATH,
+    command_path,
+    device_info_path,
+    status_path,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -121,6 +127,18 @@ class TuyaCloudApi:
         remaining = result.get("expire_time") or result.get("expires_in") or 7200
         self._token_expires_at = dt_util.utcnow() + timedelta(seconds=max(int(remaining), 10))
         _LOGGER.debug("Tuya access token acquired, %ss remaining", remaining)
+
+    async def async_list_devices(self) -> list[dict]:
+        """Return every device in the cloud project.
+
+        Used by the config flow: this is where the local key comes from, and it
+        carries friendly names so the user can recognise their device. The
+        response includes local keys for every device in the project, so it
+        must never be logged or written to diagnostics.
+        """
+        data = await self._request_with_token_retry("GET", DEVICE_LIST_PATH)
+        result = data.get("result", [])
+        return result if isinstance(result, list) else []
 
     async def async_get_properties(self) -> dict[int, dict]:
         """Return {dp_id: {"value": ..., "time": ...}} for the device.
