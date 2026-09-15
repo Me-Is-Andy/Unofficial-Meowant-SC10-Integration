@@ -69,6 +69,11 @@ RECONNECT_CHECK_EVERY = 4
 # inside one window.
 RESET_DETECTION_THRESHOLD = 3
 
+# Local mode pushes each datapoint separately, so a reset arrives as a burst
+# of single changes rather than one batch. Collect changes for this long
+# before deciding whether they were a person or a power cycle.
+RESET_DETECTION_WINDOW = 8
+
 # platform: switch | number | sensor | time
 # category: config | diagnostic | omitted for the main Controls/Sensors sections
 # Time datapoints are stored as minutes since midnight (0-1435, 5-minute steps).

@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -43,6 +44,7 @@ from .const import (
     MODE_LOCAL,
     RECONNECT_CHECK_EVERY,
     RESET_DETECTION_THRESHOLD,
+    RESET_DETECTION_WINDOW,
     SCAN_INTERVAL,
     STORAGE_VERSION,
     USE_MIN_DURATION_SECONDS,
@@ -198,6 +200,8 @@ class MeowantBaseCoordinator(DataUpdateCoordinator):
         # Settings restore
         self._desired = {}
         self._previous_values = None
+        self._pending_changes = {}
+        self._cancel_pending = None
         self.last_reboot_at = None
         self._restoring = False
 
@@ -208,6 +212,7 @@ class MeowantBaseCoordinator(DataUpdateCoordinator):
 
     async def async_shutdown_transport(self) -> None:
         """Close anything opened by async_prepare."""
+        self._clear_pending()
 
     @property
     def device_online(self) -> bool | None:
@@ -338,12 +343,23 @@ class MeowantBaseCoordinator(DataUpdateCoordinator):
             async_dispatcher_send(self.hass, VISIT_SIGNAL)
 
     @callback
-    def _track_settings(self, values: dict) -> None:
-        """Follow setting changes, and spot the mass reset a reboot causes.
+    def _clear_pending(self) -> None:
+        """Drop any settings change waiting to be judged."""
+        if self._cancel_pending is not None:
+            self._cancel_pending()
+            self._cancel_pending = None
+        self._pending_changes = {}
 
-        One setting changing is someone using the vendor app, so adopt it as
-        the new desired value. Several changing at once is the device coming
-        back up with its defaults, so put the saved values back instead.
+    @callback
+    def _track_settings(self, values: dict) -> None:
+        """Notice setting changes, and hold them briefly before judging them.
+
+        A power cycle resets several settings at once, but local mode pushes
+        each datapoint as its own message milliseconds apart, so counting
+        changes per message would only ever see one at a time. Changes are
+        therefore collected for a few seconds first: one or two is a person
+        using the vendor app, several together is the device coming back up
+        with its defaults.
         """
         current = {dp_id: values[dp_id] for dp_id in RESTORABLE_DPS if dp_id in values}
         if not current:
@@ -372,9 +388,33 @@ class MeowantBaseCoordinator(DataUpdateCoordinator):
         if not changed:
             return
 
+        self._pending_changes.update(changed)
+        _LOGGER.debug(
+            "Setting change pending: %s (%s so far)",
+            ", ".join(DP_MAPPING[dp_id]["code"] for dp_id in sorted(changed)),
+            len(self._pending_changes),
+        )
+
+        # Restart the window on each new change, so a burst is judged whole.
+        if self._cancel_pending is not None:
+            self._cancel_pending()
+        self._cancel_pending = async_call_later(
+            self.hass, RESET_DETECTION_WINDOW, self._judge_pending
+        )
+
+    @callback
+    def _judge_pending(self, _now) -> None:
+        """Decide whether the collected changes were a person or a reset."""
+        self._cancel_pending = None
+        changed = self._pending_changes
+        self._pending_changes = {}
+
+        if not changed:
+            return
+
         if len(changed) >= RESET_DETECTION_THRESHOLD:
             _LOGGER.warning(
-                "%s settings changed at once (%s) - treating this as a device "
+                "%s settings changed together (%s) - treating this as a device "
                 "restart and restoring saved values",
                 len(changed),
                 ", ".join(DP_MAPPING[dp_id]["code"] for dp_id in sorted(changed)),
@@ -382,7 +422,7 @@ class MeowantBaseCoordinator(DataUpdateCoordinator):
             self.last_reboot_at = dt_util.utcnow().isoformat()
             self._save_state()
             self.hass.async_create_task(
-                self._restore_settings(dict(self._previous_values))
+                self._restore_settings(dict(self._previous_values or {}))
             )
             return
 
@@ -401,6 +441,8 @@ class MeowantBaseCoordinator(DataUpdateCoordinator):
         dp_id = CODE_TO_DP.get(code)
         if dp_id is None or dp_id not in RESTORABLE_DPS:
             return
+        # This change is ours, so it must not also be judged as external.
+        self._pending_changes.pop(dp_id, None)
         if self._desired.get(dp_id) == value:
             return
         self._desired[dp_id] = value
@@ -411,6 +453,7 @@ class MeowantBaseCoordinator(DataUpdateCoordinator):
         if self._restoring:
             return
         self._restoring = True
+        self._clear_pending()
         try:
             restored = 0
             for dp_id in sorted(RESTORABLE_DPS):
@@ -440,11 +483,12 @@ class MeowantBaseCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Settings already matched; nothing to restore")
         finally:
             # Keep the guard up through the refresh: the values we just wrote
-            # would otherwise read as another mass change and retrigger this.
+            # would otherwise read as another change and retrigger this.
             try:
                 await self.async_request_refresh()
             finally:
                 self._restoring = False
+                self._clear_pending()
 
     @property
     def confirmation(self) -> str:
@@ -733,6 +777,7 @@ class MeowantLocalCoordinator(MeowantBaseCoordinator):
         await self._client.async_start()
 
     async def async_shutdown_transport(self) -> None:
+        await super().async_shutdown_transport()
         await self._client.async_stop()
 
     async def _async_update_data(self) -> dict:
@@ -794,6 +839,7 @@ class MeowantLocalCoordinator(MeowantBaseCoordinator):
             # A reconnection replays the device's current state, which must not
             # be mistaken for events that happened while we were away.
             self._primed = False
+            self._clear_pending()
         self.async_update_listeners()
 
     @callback
