@@ -37,6 +37,9 @@ from .const import (
     DEFAULT_DATA_CENTER,
     DEFAULT_MODE,
     DEFAULT_PROTOCOL_VERSION,
+    DEODORIZER_CONFIRM_PHRASE,
+    DEODORIZER_CONFIRM_TIMEOUT_SECONDS,
+    DEODORIZER_CONFIRMATION_SIGNAL,
     DOMAIN,
     DP_MAPPING,
     HISTORY_DP,
@@ -188,6 +191,8 @@ class MeowantBaseCoordinator(DataUpdateCoordinator):
         self._store = store
         self._confirmation = ""
         self._confirmation_at = None
+        self._deodorizer_confirmation = ""
+        self._deodorizer_confirmation_at = None
         # Visit tracking
         self._visit_day = None
         self.visits_today = 0
@@ -517,6 +522,33 @@ class MeowantBaseCoordinator(DataUpdateCoordinator):
         """Check the phrase and clear it, whether or not it matched."""
         matched = self.confirmation.upper() == CONFIRM_PHRASE
         self.clear_confirmation()
+        return matched
+
+    @property
+    def deodorizer_confirmation(self) -> str:
+        if self._deodorizer_confirmation_at is None:
+            return ""
+        if (dt_util.utcnow() - self._deodorizer_confirmation_at).total_seconds() > DEODORIZER_CONFIRM_TIMEOUT_SECONDS:
+            return ""
+        return self._deodorizer_confirmation
+
+    @callback
+    def set_deodorizer_confirmation(self, value: str) -> None:
+        self._deodorizer_confirmation = (value or "").strip()
+        self._deodorizer_confirmation_at = dt_util.utcnow()
+        async_dispatcher_send(self.hass, DEODORIZER_CONFIRMATION_SIGNAL)
+
+    @callback
+    def clear_deodorizer_confirmation(self) -> None:
+        self._deodorizer_confirmation = ""
+        self._deodorizer_confirmation_at = None
+        async_dispatcher_send(self.hass, DEODORIZER_CONFIRMATION_SIGNAL)
+
+    @callback
+    def consume_deodorizer_confirmation(self) -> bool:
+        """Check the deodorizer phrase and clear it, whether or not it matched."""
+        matched = self.deodorizer_confirmation.upper() == DEODORIZER_CONFIRM_PHRASE
+        self.clear_deodorizer_confirmation()
         return matched
 
 

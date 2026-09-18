@@ -37,17 +37,39 @@
           "local_key": "Read from the cloud automatically. It changes if the device is re-paired in the vendor app.",
           "protocol_version": "3.5 for recent devices. Try 3.3 or 3.4 if the connection fails."
         }
+      },
+      "deodorizer": {
+        "title": "Deodorizer cartridge",
+        "description": "Enter the current deodorizer cartridge percentage. Check the app you initially configured the Litter Box with.",
+        "data": {
+          "deodorizer_percentage": "Current percentage (0-100)"
+        },
+        "data_description": {
+          "deodorizer_percentage": "If you're setting up mid-cartridge life, enter the estimated remaining percentage. The sensor will then track depletion at 4% per day, ticking down once at midnight each day. Leave blank to start at 100% from today."
+        }
       }
     },
     "error": {
       "cannot_connect": "Could not reach the Tuya API. Check your network and the selected data center.",
       "invalid_auth": "Tuya rejected these credentials. Check the Access ID and Access Secret, and that the data center matches your account.",
       "no_devices": "No devices found in this cloud project. Link your Smart Life account on the Devices tab of the Tuya IoT Platform.",
+      "no_supported_devices": "Devices were found in this cloud project, but none are a Meowant SC10. This integration only supports that model.",
       "cannot_connect_local": "Could not reach the device on your network. Check the IP address, and try a different protocol version.",
       "tinytuya_missing": "The tinytuya library is not available. Restart Home Assistant and try again."
     },
     "abort": {
       "already_configured": "This litter box is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Recalibrate deodorizer",
+        "description": "Enter the current deodorizer cartridge percentage. Check the app you initially configured the Litter Box with. Leave blank to reset to 100% as of today.",
+        "data": {
+          "deodorizer_percentage": "Current percentage (0-100)"
+        }
+      }
     }
   },
   "selector": {

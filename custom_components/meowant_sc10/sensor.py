@@ -1,5 +1,5 @@
 """Read-only sensors for the Meowant SC10."""
-from datetime import datetime
+from datetime import date, datetime
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -11,12 +11,15 @@ from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
 from . import VISIT_SIGNAL, MeowantBaseEntity, MeowantEntity
 from .const import (
     BITMAP_CLEAR_LABEL,
     BITMAP_LABELS,
+    CONF_DEODORIZER_REFERENCE_DATE,
+    DEODORIZER_REFERENCE_UPDATED_SIGNAL,
     DOMAIN,
     DP_MAPPING,
     USE_MIN_DURATION_SECONDS,
@@ -46,9 +49,13 @@ async def async_setup_entry(
     entities.append(MeowantUptime(coordinator))
 
     # The activation date comes from the cloud device record; the LAN protocol
-    # has no equivalent, so the entity is only meaningful in cloud mode.
+    # has no equivalent, so these entities are only meaningful in cloud mode.
     if coordinator.transport == "cloud":
         entities.append(MeowantActivated(coordinator))
+    
+    # Deodorizer percentage: date-derived, independent of transport or the
+    # device's own activation time.
+    entities.append(MeowantDeodorizerPercentage(coordinator, config_entry))
 
     async_add_entities(entities)
 
@@ -315,3 +322,88 @@ class MeowantUptime(MeowantDerivedSensor):
             attributes["uptime_seconds"] = seconds
             attributes["uptime_days"] = round(seconds / 86400, 2)
         return attributes
+
+
+class MeowantDeodorizerPercentage(MeowantDerivedSensor):
+    """Deodorizer cartridge remaining percentage.
+
+    Counts down 4% per local calendar day from a stored reference date — set
+    at initial config from the entered percentage (or today, if left blank),
+    reset to today by the Reset Deodorizer button, and recalibratable anytime
+    via the integration's Configure options. Never derived from the device's
+    own activation time, since that reflects when the device was paired, not
+    when the cartridge was installed.
+    """
+
+    _attr_name = "Deodorizer Percentage"
+    _attr_icon = "mdi:spray-bottle"
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator, config_entry: ConfigEntry):
+        super().__init__(coordinator)
+        self._attr_unique_id = coordinator.uid("deodorizer_percentage")
+        self._config_entry = config_entry
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # Purely date-derived: nothing about the device pushes an update when
+        # the calendar day rolls over, so this ticks itself at local
+        # midnight rather than waiting on coordinator/device activity.
+        self.async_on_remove(
+            async_track_time_change(
+                self.hass, self._handle_midnight, hour=0, minute=0, second=5
+            )
+        )
+        # The reference date can also change immediately, via the Reset
+        # Deodorizer button or the Configure options flow. Those write
+        # straight to the config entry, which doesn't by itself trigger a
+        # state refresh, so listen for the signal they dispatch.
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                DEODORIZER_REFERENCE_UPDATED_SIGNAL,
+                self._handle_reference_updated,
+            )
+        )
+
+    @callback
+    def _handle_midnight(self, now) -> None:
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_reference_updated(self) -> None:
+        self.async_write_ha_state()
+
+    def _get_reference_date(self):
+        """The local calendar date the countdown started from, or None."""
+        stored = self._config_entry.data.get(CONF_DEODORIZER_REFERENCE_DATE)
+        if not stored:
+            return None
+        try:
+            return date.fromisoformat(stored)
+        except ValueError:
+            return None
+
+    @property
+    def native_value(self) -> int | None:
+        reference = self._get_reference_date()
+        if reference is None:
+            return None
+        days_elapsed = (dt_util.now().date() - reference).days
+        if days_elapsed < 0:
+            return None
+        return max(0, min(100, 100 - (days_elapsed * 4)))
+
+    @property
+    def extra_state_attributes(self):
+        reference = self._get_reference_date()
+        if reference is None:
+            return None
+        return {
+            "reference_date": reference.isoformat(),
+            "days_elapsed": (dt_util.now().date() - reference).days,
+            "depletion_rate": "4% per day",
+        }

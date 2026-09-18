@@ -10,6 +10,17 @@ CONF_MODE = "mode"
 CONF_HOST = "host"
 CONF_LOCAL_KEY = "local_key"
 CONF_PROTOCOL_VERSION = "protocol_version"
+CONF_DEODORIZER_PERCENTAGE = "deodorizer_percentage"
+# The calendar date (local time, ISO format) the depletion countdown starts
+# from at 100%. Set at initial config from the entered percentage, and reset
+# to today whenever the cartridge is replaced. Never derived from the
+# device's own activation time.
+CONF_DEODORIZER_REFERENCE_DATE = "deodorizer_reference_date"
+
+# Tuya's product id for the MW-SC10. Confirmed from the device's own record;
+# the cloud project can contain unrelated devices, and this integration only
+# understands this one.
+SUPPORTED_PRODUCT_IDS = {"wyvu1hlo3s9weqt9"}
 
 MODE_CLOUD = "cloud"
 MODE_LOCAL = "local"
@@ -175,6 +186,12 @@ CONFIRM_PHRASE = "EMPTY"
 CONFIRM_TIMEOUT_SECONDS = 60
 CONFIRM_MAX_LENGTH = 16
 CONFIRMATION_SIGNAL = f"{DOMAIN}_confirmation_updated"
+
+DEODORIZER_CONFIRM_PHRASE = "Reset"
+DEODORIZER_CONFIRM_TIMEOUT_SECONDS = 60
+DEODORIZER_CONFIRM_MAX_LENGTH = 16
+DEODORIZER_CONFIRMATION_SIGNAL = f"{DOMAIN}_deodorizer_confirmation_updated"
+DEODORIZER_REFERENCE_UPDATED_SIGNAL = f"{DOMAIN}_deodorizer_reference_updated"
 
 # One-shot buttons. Each fires a single enum value at a datapoint.
 # key -> unique_id suffix; dp_id is only used for availability tracking.

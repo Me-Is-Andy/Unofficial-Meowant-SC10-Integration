@@ -5,12 +5,17 @@ local key is obtained, and re-pairing the device invalidates that key, so
 keeping them lets the integration recover without the user hunting for it.
 """
 import logging
+from datetime import timedelta
 
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -18,10 +23,14 @@ from homeassistant.helpers.selector import (
 )
 
 from .api import TuyaApiError, TuyaCloudApi
+from homeassistant.util import dt as dt_util
+
 from .const import (
     CONF_ACCESS_ID,
     CONF_ACCESS_SECRET,
     CONF_DATA_CENTER,
+    CONF_DEODORIZER_PERCENTAGE,
+    CONF_DEODORIZER_REFERENCE_DATE,
     CONF_DEVICE_ID,
     CONF_HOST,
     CONF_LOCAL_KEY,
@@ -31,10 +40,12 @@ from .const import (
     DEFAULT_DATA_CENTER,
     DEFAULT_MODE,
     DEFAULT_PROTOCOL_VERSION,
+    DEODORIZER_REFERENCE_UPDATED_SIGNAL,
     DOMAIN,
     MODE_LOCAL,
     MODES,
     PROTOCOL_VERSIONS,
+    SUPPORTED_PRODUCT_IDS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,6 +70,16 @@ STEP_CREDENTIALS_SCHEMA = vol.Schema(
         ),
     }
 )
+
+
+def _is_supported_device(device: dict) -> bool:
+    """True if this device's product id matches the MW-SC10.
+
+    The Tuya device-list endpoint has been observed returning the product id
+    under either camelCase or snake_case, so both are checked.
+    """
+    product_id = device.get("productId") or device.get("product_id")
+    return product_id in SUPPORTED_PRODUCT_IDS
 
 
 async def _async_scan_for_host(hass: HomeAssistant, device_id: str) -> str | None:
@@ -97,6 +118,11 @@ class MeowantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._credentials: dict = {}
         self._devices: list[dict] = []
         self._device: dict = {}
+        self._deodorizer_data: dict = {}
+
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        return MeowantOptionsFlow(config_entry)
 
     async def async_step_user(self, user_input=None):
         """Collect cloud credentials and the choice of transport."""
@@ -132,8 +158,11 @@ class MeowantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.exception("Unexpected error listing devices")
                     errors["base"] = "cannot_connect"
                 else:
+                    supported = [d for d in devices if _is_supported_device(d)]
                     if not devices:
                         errors["base"] = "no_devices"
+                    elif not supported:
+                        errors["base"] = "no_supported_devices"
                     else:
                         self._credentials = {
                             CONF_ACCESS_ID: user_input[CONF_ACCESS_ID].strip(),
@@ -141,7 +170,7 @@ class MeowantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_DATA_CENTER: user_input[CONF_DATA_CENTER],
                             CONF_MODE: user_input[CONF_MODE],
                         }
-                        self._devices = devices
+                        self._devices = supported
                         return await self.async_step_device()
 
         return self.async_show_form(
@@ -162,9 +191,7 @@ class MeowantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 (d for d in self._devices if d.get("id") == device_id), {}
             )
 
-            if self._credentials[CONF_MODE] == MODE_LOCAL:
-                return await self.async_step_local()
-            return self._create_entry()
+            return await self.async_step_deodorizer()
 
         options = []
         for device in self._devices:
@@ -191,6 +218,49 @@ class MeowantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         )
 
+    async def async_step_deodorizer(self, user_input=None):
+        """Optionally set the current deodorizer cartridge percentage.
+
+        This is converted immediately into a reference date (today minus the
+        days that percentage implies) so the sensor never has to touch this
+        raw value again, and never depends on the device's own activation
+        time.
+        """
+        if user_input is not None:
+            pct = user_input.get(CONF_DEODORIZER_PERCENTAGE)
+            today = dt_util.now().date()
+            if pct is not None:
+                days_ago = round((100 - pct) / 4)
+                reference_date = today - timedelta(days=days_ago)
+            else:
+                # Nothing entered: assume a fresh cartridge as of today.
+                reference_date = today
+            extra = {
+                CONF_DEODORIZER_REFERENCE_DATE: reference_date.isoformat(),
+            }
+
+            if self._credentials[CONF_MODE] == MODE_LOCAL:
+                # Store for local step to use
+                self._deodorizer_data = extra
+                return await self.async_step_local()
+            return self._create_entry(extra)
+
+        return self.async_show_form(
+            step_id="deodorizer",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_DEODORIZER_PERCENTAGE): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=100,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    )
+                }
+            ),
+            last_step=False,
+        )
+
     async def async_step_local(self, user_input=None):
         """Confirm the LAN address and protocol version for local control."""
         errors = {}
@@ -205,13 +275,13 @@ class MeowantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if error:
                 errors["base"] = error
             else:
-                return self._create_entry(
-                    {
-                        CONF_HOST: host,
-                        CONF_LOCAL_KEY: local_key,
-                        CONF_PROTOCOL_VERSION: version,
-                    }
-                )
+                extra = {
+                    CONF_HOST: host,
+                    CONF_LOCAL_KEY: local_key,
+                    CONF_PROTOCOL_VERSION: version,
+                    **self._deodorizer_data,
+                }
+                return self._create_entry(extra)
             suggested_host = host
         else:
             suggested_host = await _async_scan_for_host(self.hass, device_id) or ""
@@ -278,3 +348,44 @@ class MeowantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reauth(self, entry_data):
         """Re-prompt for credentials when the API rejects them."""
         return await self.async_step_user()
+
+
+class MeowantOptionsFlow(config_entries.OptionsFlow):
+    """Lets the deodorizer baseline be recalibrated without deleting the entry."""
+
+    def __init__(self, config_entry) -> None:
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            pct = user_input.get(CONF_DEODORIZER_PERCENTAGE)
+            today = dt_util.now().date()
+            if pct is not None:
+                days_ago = round((100 - pct) / 4)
+                reference_date = today - timedelta(days=days_ago)
+            else:
+                reference_date = today
+            self.hass.config_entries.async_update_entry(
+                self._config_entry,
+                data={
+                    **self._config_entry.data,
+                    CONF_DEODORIZER_REFERENCE_DATE: reference_date.isoformat(),
+                },
+            )
+            async_dispatcher_send(self.hass, DEODORIZER_REFERENCE_UPDATED_SIGNAL)
+            return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_DEODORIZER_PERCENTAGE): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=100,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    )
+                }
+            ),
+        )

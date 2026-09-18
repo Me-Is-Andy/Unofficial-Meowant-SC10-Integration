@@ -37,6 +37,16 @@
           "local_key": "Read from the cloud automatically. It changes if the device is re-paired in the vendor app.",
           "protocol_version": "3.5 for recent devices. Try 3.3 or 3.4 if the connection fails."
         }
+      },
+      "deodorizer": {
+        "title": "Deodorizer cartridge",
+        "description": "Optionally enter the current deodorizer cartridge percentage. Leave blank to calculate from device activation date. The sensor will count down 4% per day.",
+        "data": {
+          "deodorizer_percentage": "Current percentage (0-100)"
+        },
+        "data_description": {
+          "deodorizer_percentage": "If you're setting up mid-cartridge life, enter the estimated remaining percentage. The sensor will then track depletion at 4% per day from this baseline."
+        }
       }
     },
     "error": {
